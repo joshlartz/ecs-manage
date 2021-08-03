@@ -6,9 +6,8 @@ use rusoto_ecs::{
     DescribeTaskDefinitionError, DescribeTaskDefinitionRequest, Ecs, EcsClient, ListServicesError,
     ListServicesRequest, Service, UpdateServiceError, UpdateServiceRequest,
 };
-use rusoto_elbv2::{
-    DescribeTargetGroupsError, DescribeTargetGroupsInput, Elb, ElbClient, TargetGroup,
-};
+use rusoto_elbv2::{DescribeTargetGroupsInput, Elb, ElbClient, TargetGroup};
+use rusoto_core::{RusotoError};
 
 use args::*;
 use helpers;
@@ -53,14 +52,15 @@ pub fn list_services(ecs_client: &EcsClient, cluster: String) -> Result<Vec<Stri
                     launch_type: None,
                     max_results: None,
                     next_token: token.clone(),
+                    scheduling_strategy: Some("REPLICA".to_owned())
                 })
                 .sync()
                 .map_err(|e| match e {
-                    ListServicesError::Unknown(s) => {
+                    RusotoError::Service(ListServicesError::Server(s)) => {
                         if s == r#"{"__type":"ThrottlingException","message":"Rate exceeded"}"# {
-                            backoff::Error::Transient(ListServicesError::Unknown(s))
+                            backoff::Error::Transient(RusotoError::Service(ListServicesError::Server(s)))
                         } else {
-                            backoff::Error::Permanent(ListServicesError::Unknown(s))
+                            backoff::Error::Permanent(RusotoError::Service(ListServicesError::Server(s)))
                         }
                     }
                     _ => backoff::Error::Permanent(e),
@@ -86,14 +86,15 @@ pub fn describe_service(
             .describe_services(DescribeServicesRequest {
                 cluster: Some(cluster.clone()),
                 services: vec![service.clone()],
+                include: None
             })
             .sync()
             .map_err(|e| match e {
-                DescribeServicesError::Unknown(s) => {
+                RusotoError::Service(DescribeServicesError::Server(s)) => {
                     if s == r#"{"__type":"ThrottlingException","message":"Rate exceeded"}"# {
-                        backoff::Error::Transient(DescribeServicesError::Unknown(s))
+                        backoff::Error::Transient(RusotoError::Service(DescribeServicesError::Server(s)))
                     } else {
-                        backoff::Error::Permanent(DescribeServicesError::Unknown(s))
+                        backoff::Error::Permanent(RusotoError::Service(DescribeServicesError::Server(s)))
                     }
                 }
                 _ => backoff::Error::Permanent(e),
@@ -166,7 +167,7 @@ pub fn create_service(
             client_token: None,
             cluster: Some(cluster.clone()),
             deployment_configuration: from_service.deployment_configuration.clone(),
-            desired_count,
+            desired_count: Some(desired_count),
             health_check_grace_period_seconds: from_service.health_check_grace_period_seconds,
             launch_type: from_service.launch_type.clone(),
             load_balancers: from_service.load_balancers.clone(),
@@ -176,8 +177,13 @@ pub fn create_service(
             platform_version: from_service.platform_version.clone(),
             role: role.clone(),
             service_name: service_name.clone(),
-            task_definition: task_definition.clone(),
+            task_definition: Some(task_definition.clone()),
             service_registries: None,
+            deployment_controller: from_service.deployment_controller,
+            enable_ecs_managed_tags: from_service.enable_ecs_managed_tags,
+            propagate_tags: from_service.propagate_tags,
+            scheduling_strategy: from_service.scheduling_strategy,
+            tags: from_service.tags
         })
         .sync();
 
@@ -246,11 +252,11 @@ pub fn update_service(
                 .update_service(req.clone())
                 .sync()
                 .map_err(|e| match e {
-                    UpdateServiceError::Unknown(s) => {
+                    RusotoError::Service(UpdateServiceError::Server(s)) => {
                         if s == r#"{"__type":"ThrottlingException","message":"Rate exceeded"}"# {
-                            backoff::Error::Transient(UpdateServiceError::Unknown(s))
+                            backoff::Error::Transient(RusotoError::Service(UpdateServiceError::Server(s)))
                         } else {
-                            backoff::Error::Permanent(UpdateServiceError::Unknown(s))
+                            backoff::Error::Permanent(RusotoError::Service(UpdateServiceError::Server(s)))
                         }
                     }
                     _ => backoff::Error::Permanent(e),
@@ -292,14 +298,15 @@ pub fn service_ecr_images(
                     ecs_client
                         .describe_task_definition(DescribeTaskDefinitionRequest {
                             task_definition: task_definition.clone(),
+                            include: None
                         })
                         .sync()
                         .map_err(|e| match e {
-                            DescribeTaskDefinitionError::Unknown(s) => if s
+                            RusotoError::Service(DescribeTaskDefinitionError::Server(s)) => if s
                                 == r#"{"__type":"ThrottlingException","message":"Rate exceeded"}"# {
-                                backoff::Error::Transient(DescribeTaskDefinitionError::Unknown(s))
+                                backoff::Error::Transient(RusotoError::Service(DescribeTaskDefinitionError::Server(s)))
                             } else {
-                                backoff::Error::Permanent(DescribeTaskDefinitionError::Unknown(s))
+                                backoff::Error::Permanent(RusotoError::Service(DescribeTaskDefinitionError::Server(s)))
                             },
                             _ => backoff::Error::Permanent(e),
                         })
@@ -403,15 +410,11 @@ pub fn service_target_groups(
                                     })
                                     .sync()
                                     .map_err(|e| match e {
-                                        DescribeTargetGroupsError::Unknown(s) => {
-                                            if s.contains("<Code>Throttling</Code>") {
-                                                backoff::Error::Transient(
-                                                    DescribeTargetGroupsError::Unknown(s),
-                                                )
+                                        RusotoError::Unknown(s) => {
+                                            if s.body_as_str().contains("<Code>Throttling</Code>") {
+                                                backoff::Error::Transient(RusotoError::Unknown(s))
                                             } else {
-                                                backoff::Error::Permanent(
-                                                    DescribeTargetGroupsError::Unknown(s),
-                                                )
+                                                backoff::Error::Permanent(RusotoError::Unknown(s))
                                             }
                                         }
                                         _ => backoff::Error::Permanent(e),
