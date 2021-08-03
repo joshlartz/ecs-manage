@@ -1,13 +1,13 @@
 use backoff;
 use failure::Error;
+use rusoto_core::RusotoError;
 use rusoto_ecr::{DescribeImagesRequest, Ecr, EcrClient, ImageDetail, ImageIdentifier};
 use rusoto_ecs::{
-    CreateServiceRequest, DescribeServicesError, DescribeServicesRequest,
-    DescribeTaskDefinitionError, DescribeTaskDefinitionRequest, Ecs, EcsClient, ListServicesError,
-    ListServicesRequest, Service, UpdateServiceError, UpdateServiceRequest,
+    CreateServiceRequest, DescribeServicesError, DescribeServicesRequest, DescribeTaskDefinitionError,
+    DescribeTaskDefinitionRequest, Ecs, EcsClient, ListServicesError, ListServicesRequest, Service, UpdateServiceError,
+    UpdateServiceRequest,
 };
 use rusoto_elbv2::{DescribeTargetGroupsInput, Elb, ElbClient, TargetGroup};
-use rusoto_core::{RusotoError};
 
 use args::*;
 use helpers;
@@ -52,7 +52,7 @@ pub fn list_services(ecs_client: &EcsClient, cluster: String) -> Result<Vec<Stri
                     launch_type: None,
                     max_results: None,
                     next_token: token.clone(),
-                    scheduling_strategy: Some("REPLICA".to_owned())
+                    scheduling_strategy: Some("REPLICA".to_owned()),
                 })
                 .sync()
                 .map_err(|e| match e {
@@ -76,17 +76,13 @@ pub fn list_services(ecs_client: &EcsClient, cluster: String) -> Result<Vec<Stri
     Ok(services)
 }
 
-pub fn describe_service(
-    ecs_client: &EcsClient,
-    cluster: String,
-    service: String,
-) -> Result<Service, Error> {
+pub fn describe_service(ecs_client: &EcsClient, cluster: String, service: String) -> Result<Service, Error> {
     let res = helpers::retry_log(format!("Describing {}/{}", cluster, service), || {
         ecs_client
             .describe_services(DescribeServicesRequest {
                 cluster: Some(cluster.clone()),
                 services: vec![service.clone()],
-                include: None
+                include: None,
             })
             .sync()
             .map_err(|e| match e {
@@ -126,10 +122,7 @@ pub fn create_service(
     from_service: Service,
     role_suffix: Option<String>,
 ) -> Result<Option<Service>, Error> {
-    let has_loadbalancer = from_service
-        .load_balancers
-        .clone()
-        .map_or(false, |l| !l.is_empty());
+    let has_loadbalancer = from_service.load_balancers.clone().map_or(false, |l| !l.is_empty());
     let is_awsvpc = from_service
         .network_configuration
         .clone()
@@ -147,20 +140,17 @@ pub fn create_service(
 
     let service_name = service_name(&from_service)?;
 
-    println!(
-        "Creating {}/{} with role: {:?}",
-        cluster, service_name, role
-    );
+    println!("Creating {}/{} with role: {:?}", cluster, service_name, role);
 
-    let desired_count = from_service.clone().desired_count.ok_or(format_err!(
-        "No desired count found for {:?}",
-        &service_name
-    ))?;
+    let desired_count = from_service
+        .clone()
+        .desired_count
+        .ok_or(format_err!("No desired count found for {:?}", &service_name))?;
 
-    let task_definition = from_service.clone().task_definition.ok_or(format_err!(
-        "No task definition found for {}",
-        &service_name
-    ))?;
+    let task_definition = from_service
+        .clone()
+        .task_definition
+        .ok_or(format_err!("No task definition found for {}", &service_name))?;
 
     let response = ecs_client
         .create_service(CreateServiceRequest {
@@ -183,7 +173,7 @@ pub fn create_service(
             enable_ecs_managed_tags: from_service.enable_ecs_managed_tags,
             propagate_tags: from_service.propagate_tags,
             scheduling_strategy: from_service.scheduling_strategy,
-            tags: from_service.tags
+            tags: from_service.tags,
         })
         .sync();
 
@@ -245,24 +235,18 @@ pub fn update_service(
         }
     };
 
-    helpers::retry_log(
-        format!("Updating {}/{}'s {}", cluster, service_name, summary),
-        || {
-            ecs_client
-                .update_service(req.clone())
-                .sync()
-                .map_err(|e| match e {
-                    RusotoError::Service(UpdateServiceError::Server(s)) => {
-                        if s == r#"{"__type":"ThrottlingException","message":"Rate exceeded"}"# {
-                            backoff::Error::Transient(RusotoError::Service(UpdateServiceError::Server(s)))
-                        } else {
-                            backoff::Error::Permanent(RusotoError::Service(UpdateServiceError::Server(s)))
-                        }
-                    }
-                    _ => backoff::Error::Permanent(e),
-                })
-        },
-    )?
+    helpers::retry_log(format!("Updating {}/{}'s {}", cluster, service_name, summary), || {
+        ecs_client.update_service(req.clone()).sync().map_err(|e| match e {
+            RusotoError::Service(UpdateServiceError::Server(s)) => {
+                if s == r#"{"__type":"ThrottlingException","message":"Rate exceeded"}"# {
+                    backoff::Error::Transient(RusotoError::Service(UpdateServiceError::Server(s)))
+                } else {
+                    backoff::Error::Permanent(RusotoError::Service(UpdateServiceError::Server(s)))
+                }
+            }
+            _ => backoff::Error::Permanent(e),
+        })
+    })?
     .service
     .ok_or(format_err!("Tried to update service, but nothing returned"))
 }
@@ -293,85 +277,74 @@ pub fn service_ecr_images(
 ) -> Result<Vec<Result<ImageDetail, Error>>, Error> {
     match service.task_definition {
         Some(ref task_definition) => {
-            let task_definition =
-                helpers::retry_log(format!("describing {}", task_definition), || {
-                    ecs_client
-                        .describe_task_definition(DescribeTaskDefinitionRequest {
-                            task_definition: task_definition.clone(),
-                            include: None
-                        })
-                        .sync()
-                        .map_err(|e| match e {
-                            RusotoError::Service(DescribeTaskDefinitionError::Server(s)) => if s
-                                == r#"{"__type":"ThrottlingException","message":"Rate exceeded"}"# {
+            let task_definition = helpers::retry_log(format!("describing {}", task_definition), || {
+                ecs_client
+                    .describe_task_definition(DescribeTaskDefinitionRequest {
+                        task_definition: task_definition.clone(),
+                        include: None,
+                    })
+                    .sync()
+                    .map_err(|e| match e {
+                        RusotoError::Service(DescribeTaskDefinitionError::Server(s)) => {
+                            if s == r#"{"__type":"ThrottlingException","message":"Rate exceeded"}"# {
                                 backoff::Error::Transient(RusotoError::Service(DescribeTaskDefinitionError::Server(s)))
                             } else {
                                 backoff::Error::Permanent(RusotoError::Service(DescribeTaskDefinitionError::Server(s)))
-                            },
-                            _ => backoff::Error::Permanent(e),
-                        })
-                })?
-                .task_definition;
+                            }
+                        }
+                        _ => backoff::Error::Permanent(e),
+                    })
+            })?
+            .task_definition;
 
             match task_definition {
                 Some(task_definition) => match task_definition.container_definitions {
                     Some(cds) => {
-                        let image_arns = cds
-                            .into_iter()
-                            .map(|cd| cd.image)
-                            .collect::<Vec<Option<String>>>();
+                        let image_arns = cds.into_iter().map(|cd| cd.image).collect::<Vec<Option<String>>>();
 
                         let mut images = Vec::new();
 
                         for image_arn in image_arns {
                             match image_arn {
-                                Some(image_arn) => {
-                                    match image_arn.split('/').collect::<Vec<&str>>().pop() {
-                                        Some(repo_image) => {
-                                            let split_repo_image =
-                                                repo_image.splitn(2, ':').collect::<Vec<&str>>();
+                                Some(image_arn) => match image_arn.split('/').collect::<Vec<&str>>().pop() {
+                                    Some(repo_image) => {
+                                        let split_repo_image = repo_image.splitn(2, ':').collect::<Vec<&str>>();
 
-                                            let image_id = ImageIdentifier {
-                                                image_digest: None,
-                                                image_tag: Some(if split_repo_image.len() == 2 {
-                                                    split_repo_image[1].to_string()
-                                                } else {
-                                                    String::from("latest")
-                                                }),
-                                            };
+                                        let image_id = ImageIdentifier {
+                                            image_digest: None,
+                                            image_tag: Some(if split_repo_image.len() == 2 {
+                                                split_repo_image[1].to_string()
+                                            } else {
+                                                String::from("latest")
+                                            }),
+                                        };
 
-                                            let image_details_res = ecr_client
-                                                .describe_images(DescribeImagesRequest {
-                                                    filter: None,
-                                                    image_ids: Some(vec![image_id]),
-                                                    max_results: None,
-                                                    next_token: None,
-                                                    registry_id: None,
-                                                    repository_name: split_repo_image[0]
-                                                        .to_string(),
-                                                })
-                                                .sync();
+                                        let image_details_res = ecr_client
+                                            .describe_images(DescribeImagesRequest {
+                                                filter: None,
+                                                image_ids: Some(vec![image_id]),
+                                                max_results: None,
+                                                next_token: None,
+                                                registry_id: None,
+                                                repository_name: split_repo_image[0].to_string(),
+                                            })
+                                            .sync();
 
-                                            match image_details_res {
-                                                Ok(image_details_res) => {
-                                                    match image_details_res.image_details {
-                                                        Some(mut image_details) => {
-                                                            match image_details.pop() {
-                                                                Some(image_detail) => {
-                                                                    images.push(Ok(image_detail));
-                                                                }
-                                                                None => {}
-                                                            }
-                                                        }
-                                                        None => {}
+                                        match image_details_res {
+                                            Ok(image_details_res) => match image_details_res.image_details {
+                                                Some(mut image_details) => match image_details.pop() {
+                                                    Some(image_detail) => {
+                                                        images.push(Ok(image_detail));
                                                     }
-                                                }
-                                                Err(e) => images.push(Err(e.into())),
-                                            }
+                                                    None => {}
+                                                },
+                                                None => {}
+                                            },
+                                            Err(e) => images.push(Err(e.into())),
                                         }
-                                        None => {}
                                     }
-                                }
+                                    None => {}
+                                },
                                 None => {}
                             }
                         }
@@ -398,39 +371,36 @@ pub fn service_target_groups(
             for target_group_arn in load_balancers.iter().map(|lb| lb.target_group_arn.clone()) {
                 match target_group_arn {
                     Some(target_group_arn) => {
-                        let target_groups_res =
-                            helpers::retry_log(format!("describing {}", target_group_arn), || {
-                                elb_client
-                                    .describe_target_groups(DescribeTargetGroupsInput {
-                                        load_balancer_arn: None,
-                                        marker: None,
-                                        names: None,
-                                        page_size: None,
-                                        target_group_arns: Some(vec![target_group_arn.clone()]),
-                                    })
-                                    .sync()
-                                    .map_err(|e| match e {
-                                        RusotoError::Unknown(s) => {
-                                            if s.body_as_str().contains("<Code>Throttling</Code>") {
-                                                backoff::Error::Transient(RusotoError::Unknown(s))
-                                            } else {
-                                                backoff::Error::Permanent(RusotoError::Unknown(s))
-                                            }
+                        let target_groups_res = helpers::retry_log(format!("describing {}", target_group_arn), || {
+                            elb_client
+                                .describe_target_groups(DescribeTargetGroupsInput {
+                                    load_balancer_arn: None,
+                                    marker: None,
+                                    names: None,
+                                    page_size: None,
+                                    target_group_arns: Some(vec![target_group_arn.clone()]),
+                                })
+                                .sync()
+                                .map_err(|e| match e {
+                                    RusotoError::Unknown(s) => {
+                                        if s.body_as_str().contains("<Code>Throttling</Code>") {
+                                            backoff::Error::Transient(RusotoError::Unknown(s))
+                                        } else {
+                                            backoff::Error::Permanent(RusotoError::Unknown(s))
                                         }
-                                        _ => backoff::Error::Permanent(e),
-                                    })
-                            });
+                                    }
+                                    _ => backoff::Error::Permanent(e),
+                                })
+                        });
 
                         match target_groups_res {
                             Ok(target_groups_res) => match target_groups_res.target_groups {
-                                Some(mut target_group_details) => {
-                                    match target_group_details.pop() {
-                                        Some(target_group_detail) => {
-                                            target_groups.push(Ok(target_group_detail));
-                                        }
-                                        None => {}
+                                Some(mut target_group_details) => match target_group_details.pop() {
+                                    Some(target_group_detail) => {
+                                        target_groups.push(Ok(target_group_detail));
                                     }
-                                }
+                                    None => {}
+                                },
                                 None => {}
                             },
                             Err(e) => target_groups.push(Err(e.into())),

@@ -2,6 +2,7 @@
 extern crate clap;
 #[macro_use]
 extern crate structopt;
+extern crate rusoto_application_autoscaling;
 extern crate rusoto_core;
 extern crate rusoto_credential;
 extern crate rusoto_ecr;
@@ -59,10 +60,9 @@ fn main() -> Result<(), Error> {
                     "{}/{} - Task: {} - Desired Count: {}",
                     cluster,
                     service_name,
-                    service.task_definition.ok_or(format_err!(
-                        "Service {:?} has no task definition",
-                        &service_name
-                    ))?,
+                    service
+                        .task_definition
+                        .ok_or(format_err!("Service {:?} has no task definition", &service_name))?,
                     service
                         .desired_count
                         .ok_or(format_err!("Service {} has no desired count", service_name))?,
@@ -79,8 +79,7 @@ fn main() -> Result<(), Error> {
                 let service_name = services::service_name(&service)?;
 
                 let audit_message =
-                    services::audit_service(&ecs_client, &ecr_client, &elb_client, &service)?
-                        .join(", ");
+                    services::audit_service(&ecs_client, &ecr_client, &elb_client, &service)?.join(", ");
 
                 if !audit_message.is_empty() {
                     println!("{} [{}]", service_name, audit_message);
@@ -96,8 +95,7 @@ fn main() -> Result<(), Error> {
                     destination_region,
                 },
         } => {
-            let destination_ecs_client =
-                helpers::ecs_client(args.profile.clone(), destination_region)?;
+            let destination_ecs_client = helpers::ecs_client(args.profile.clone(), destination_region)?;
             let source_ecs_client = helpers::ecs_client(args.profile.clone(), source_region)?;
             let source_only_services = services::compare_services(
                 &source_ecs_client,
@@ -123,12 +121,9 @@ fn main() -> Result<(), Error> {
                     role_suffix,
                 },
         } => {
-            let destination_ecs_client =
-                helpers::ecs_client(args.profile.clone(), destination_region)?;
-            let source_ecs_client =
-                helpers::ecs_client(args.profile.clone(), source_region.clone())?;
-            let source_ecr_client =
-                helpers::ecr_client(args.profile.clone(), source_region.clone())?;
+            let destination_ecs_client = helpers::ecs_client(args.profile.clone(), destination_region)?;
+            let source_ecs_client = helpers::ecs_client(args.profile.clone(), source_region.clone())?;
+            let source_ecr_client = helpers::ecr_client(args.profile.clone(), source_region.clone())?;
             let source_elb_client = helpers::elb_client(args.profile, source_region.clone())?;
             let source_only_services = services::compare_services(
                 &source_ecs_client,
@@ -158,12 +153,11 @@ fn main() -> Result<(), Error> {
             }
         }
         ServicesCommand {
-            command:
-                Export {
-                    cluster,
-                    region,
-                    property,
-                },
+            command: Export {
+                cluster,
+                region,
+                property,
+            },
         } => {
             let ecs_client = helpers::ecs_client(args.profile, region)?;
 
@@ -194,12 +188,7 @@ fn main() -> Result<(), Error> {
         } => {
             let ecs_client = helpers::ecs_client(args.profile, region)?;
             for service in services::describe_services(&ecs_client, cluster.clone())? {
-                services::update_service(
-                    &ecs_client,
-                    cluster.clone(),
-                    service.clone(),
-                    modification.clone(),
-                )?;
+                services::update_service(&ecs_client, cluster.clone(), service.clone(), modification.clone())?;
 
                 thread::sleep(Duration::from_millis(sleep));
             }

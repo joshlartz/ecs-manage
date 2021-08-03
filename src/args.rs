@@ -13,12 +13,7 @@ pub struct Args {
     #[structopt(long = "profile")]
     pub profile: Option<String>,
     /// Sets the level of verbosity
-    #[structopt(
-        short = "v",
-        long = "verbose",
-        parse(from_occurrences),
-        raw(global = "true")
-    )]
+    #[structopt(short = "v", long = "verbose", parse(from_occurrences), raw(global = "true"))]
     pub verbosity: usize,
     /// Sub commands
     #[structopt(subcommand)]
@@ -87,10 +82,7 @@ pub enum ServicesCommand {
         cluster: String,
         /// The AWS region
         region: Region,
-        #[structopt(raw(
-            possible_values = "&ServiceProperty::variants()",
-            case_insensitive = "true"
-        ))]
+        #[structopt(raw(possible_values = "&ServiceProperty::variants()", case_insensitive = "true"))]
         property: ServiceProperty,
     },
     /// Make changes to services
@@ -138,9 +130,7 @@ impl FromStr for DesiredCountOptions {
         if let Ok(count) = s.parse::<i64>() {
             Ok(DesiredCountOptions::Number(count))
         } else {
-            Ok(DesiredCountOptions::Map(serde_json::from_reader(
-                File::open(s)?,
-            )?))
+            Ok(DesiredCountOptions::Map(serde_json::from_reader(File::open(s)?)?))
         }
     }
 }
